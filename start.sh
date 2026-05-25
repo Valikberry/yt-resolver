@@ -1,4 +1,6 @@
 #!/bin/bash
 node download-ytdlp.js
-which ffmpeg || apt-get install -y ffmpeg
+if ! which ffmpeg; then
+  apt-get update && apt-get install -y ffmpeg
+fi
 node server.js
