@@ -8,29 +8,22 @@ if (fs.existsSync(dest)) {
   process.exit(0)
 }
 
-console.log('Installing python3...')
-try {
-  execSync('apt-get install -y python3', { stdio: 'inherit' })
-} catch(e) {
-  console.log('apt-get failed:', e.message)
-}
-
-console.log('Downloading yt-dlp...')
-const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp'
+console.log('Downloading yt-dlp standalone binary...')
+const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux'
 
 function download(url, dest, cb) {
   const file = fs.createWriteStream(dest)
   https.get(url, (res) => {
     if (res.statusCode === 301 || res.statusCode === 302) {
       file.close()
-      fs.unlinkSync(dest)
+      if (fs.existsSync(dest)) fs.unlinkSync(dest)
       download(res.headers.location, dest, cb)
       return
     }
     res.pipe(file)
     file.on('finish', () => { file.close(cb) })
   }).on('error', (err) => {
-    fs.unlinkSync(dest)
+    if (fs.existsSync(dest)) fs.unlinkSync(dest)
     cb(err)
   })
 }
