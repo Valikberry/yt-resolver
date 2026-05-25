@@ -45,7 +45,7 @@ app.post('/fire-story', async (req, res) => {
   }
   try {
     const resolveResult = await new Promise((resolve, reject) => {
-      execFile('./yt-dlp', ['-j', video_url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      execFile('./yt-dlp', ['-j', '--format', 'worst[ext=mp4]/worst', video_url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
         if (error) return reject(new Error(stderr || error.message))
         try {
           const data = JSON.parse(stdout)
