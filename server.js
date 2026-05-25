@@ -133,6 +133,45 @@ app.post('/fire-story', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }) }
 })
 
+
+const jobs = {}
+
+app.post('/prepare-async', async (req, res) => {
+  const { url, job_id } = req.body || {}
+  if (!url || !job_id) return res.status(400).json({ success: false, error: 'url and job_id required' })
+  
+  jobs[job_id] = { status: 'processing' }
+  res.json({ success: true, job_id, status: 'processing' })
+  
+  try {
+    const resolvedUrl = await new Promise((resolve, reject) => {
+      execFile('./yt-dlp', ['-j', '--format', 'worst[ext=mp4]/worst', url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) return reject(new Error(stderr || error.message))
+        try {
+          const data = JSON.parse(stdout)
+          const u = data.url || (Array.isArray(data.formats) && data.formats.length ? data.formats[data.formats.length - 1].url : null)
+          if (!u) return reject(new Error('No resolved URL'))
+          resolve(u)
+        } catch (e) { reject(e) }
+      })
+    })
+    const videoRes = await fetch(resolvedUrl)
+    if (!videoRes.ok) throw new Error('Failed to fetch video: ' + videoRes.status)
+    const bytes = Buffer.from(await videoRes.arrayBuffer())
+    if (!bytes.length) throw new Error('Empty video')
+    const result = await convertAndUpload(bytes)
+    jobs[job_id] = { status: 'done', ...result }
+  } catch (e) {
+    jobs[job_id] = { status: 'error', error: e.message }
+  }
+})
+
+app.get('/job-status/:job_id', (req, res) => {
+  const job = jobs[req.params.job_id]
+  if (!job) return res.status(404).json({ success: false, error: 'Job not found' })
+  res.json({ success: true, ...job })
+})
+
 app.listen(port, () => { console.log('yt-resolver listening on ' + port) })
 
 app.post('/prepare-from-url', async (req, res) => {
