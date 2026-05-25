@@ -1,3 +1,6 @@
+const fs = require('fs')
+const path = require('path')
+const os = require('os')
 const express = require('express')
 const { execFile } = require('child_process')
 
@@ -56,11 +59,35 @@ app.post('/fire-story', async (req, res) => {
     const videoResponse = await fetch(resolveResult)
     if (!videoResponse.ok) throw new Error(`Failed to fetch video (${videoResponse.status})`)
     const videoBytes = await videoResponse.arrayBuffer()
-    if (!videoBytes.byteLength) throw new Error('Empty video bytes')
+    if (!finalBytes.length) throw new Error('Empty video bytes')
+
+    // Convert to 9:16 portrait 1080x1920 using ffmpeg
+    const tmpInput = path.join(os.tmpdir(), `input_${Date.now()}.mp4`)
+    const tmpOutput = path.join(os.tmpdir(), `output_${Date.now()}.mp4`)
+    fs.writeFileSync(tmpInput, Buffer.from(videoBytes))
+    
+    await new Promise((resolve, reject) => {
+      execFile('ffmpeg', [
+        '-i', tmpInput,
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-y', tmpOutput
+      ], { timeout: 300000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error('ffmpeg failed: ' + stderr))
+        resolve()
+      })
+    })
+    
+    const convertedBytes = fs.readFileSync(tmpOutput)
+    fs.unlinkSync(tmpInput)
+    fs.unlinkSync(tmpOutput)
+    const finalBytes = convertedBytes
 
     const startParams = new URLSearchParams()
     startParams.append('upload_phase', 'start')
-    startParams.append('file_size', String(videoBytes.byteLength))
+    startParams.append('file_size', String(finalBytes.length))
     startParams.append('access_token', token)
     const startRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(fb_page_id)}/video_stories`, {
       method: 'POST', body: startParams
@@ -73,8 +100,8 @@ app.post('/fire-story', async (req, res) => {
 
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
-      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes 0-${videoBytes.byteLength - 1}/${videoBytes.byteLength}`, 'offset': '0', 'file_size': String(videoBytes.byteLength) },
-      body: videoBytes
+      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes 0-${finalBytes.length - 1}/${finalBytes.length}`, 'offset': '0', 'file_size': String(finalBytes.length) },
+      body: finalBytes
     })
     const uploadBody = await uploadRes.text(); if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status}): ${uploadBody.slice(0, 300)}`)
 
