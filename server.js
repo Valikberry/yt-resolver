@@ -134,3 +134,28 @@ app.post('/fire-story', async (req, res) => {
 })
 
 app.listen(port, () => { console.log('yt-resolver listening on ' + port) })
+
+app.post('/prepare-from-url', async (req, res) => {
+  const { url } = req.body || {}
+  if (!url) return res.status(400).json({ success: false, error: 'url is required' })
+  try {
+    const result = await convertAndUpload(await new Promise((resolve, reject) => {
+      execFile('./yt-dlp', ['-j', '--js-runtimes', 'nodejs', '--format', 'worst[ext=mp4]/worst', url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, async (error, stdout, stderr) => {
+        if (error) return reject(new Error(stderr || error.message))
+        try {
+          const data = JSON.parse(stdout)
+          const resolvedUrl = data.url || (Array.isArray(data.formats) && data.formats.length ? data.formats[data.formats.length - 1].url : null)
+          if (!resolvedUrl) return reject(new Error('No resolved URL'))
+          const videoRes = await fetch(resolvedUrl)
+          if (!videoRes.ok) return reject(new Error('Failed to fetch video: ' + videoRes.status))
+          const bytes = Buffer.from(await videoRes.arrayBuffer())
+          if (!bytes.length) return reject(new Error('Empty video'))
+          resolve(bytes)
+        } catch (e) { reject(e) }
+      })
+    }))
+    res.json({ success: true, ...result })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
