@@ -34,88 +34,152 @@ app.post('/resolve', (req, res) => {
   })
 })
 
-app.listen(port, () => {
-  console.log(`yt-resolver listening on ${port}`)
-})
+app.post('/prepare-video', async (req, res) => {
+  const { video_url } = req.body || {}
+  if (!video_url) return res.status(400).json({ success: false, error: 'video_url is required' })
 
-app.post('/fire-story', async (req, res) => {
-  const { video_url, fb_page_id, token } = req.body || {}
-  if (!video_url || !fb_page_id || !token) {
-    return res.status(400).json({ success: false, error: 'video_url, fb_page_id and token are required' })
-  }
   try {
-    const resolveResult = await new Promise((resolve, reject) => {
+    // Step 1: resolve
+    const resolvedUrl = await new Promise((resolve, reject) => {
       execFile('./yt-dlp', ['-j', '--format', 'worst[ext=mp4]/worst', video_url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
         if (error) return reject(new Error(stderr || error.message))
         try {
           const data = JSON.parse(stdout)
-          const resolved = data.url || (Array.isArray(data.formats) && data.formats.length ? data.formats[data.formats.length - 1].url : null)
-          if (!resolved) return reject(new Error('No resolved URL from yt-dlp'))
-          resolve(resolved)
+          const url = data.url || (Array.isArray(data.formats) && data.formats.length ? data.formats[data.formats.length - 1].url : null)
+          if (!url) return reject(new Error('No resolved URL'))
+          resolve(url)
         } catch (e) { reject(new Error('Failed to parse yt-dlp output')) }
       })
     })
 
-    const videoResponse = await fetch(resolveResult)
-    if (!videoResponse.ok) throw new Error(`Failed to fetch video (${videoResponse.status})`)
+    // Step 2: download
+    const videoResponse = await fetch(resolvedUrl)
+    if (!videoResponse.ok) throw new Error('Failed to fetch video: ' + videoResponse.status)
     const videoBytes = await videoResponse.arrayBuffer()
+    if (!videoBytes.byteLength) throw new Error('Empty video')
 
-    // Convert to 9:16 portrait 1080x1920 using ffmpeg
-    const tmpInput = path.join(os.tmpdir(), `input_${Date.now()}.mp4`)
-    const tmpOutput = path.join(os.tmpdir(), `output_${Date.now()}.mp4`)
+    // Step 3: ffmpeg convert to 9:16 portrait
+    const tmpInput = path.join(os.tmpdir(), 'input_' + Date.now() + '.mp4')
+    const tmpOutput = path.join(os.tmpdir(), 'output_' + Date.now() + '.mp4')
     fs.writeFileSync(tmpInput, Buffer.from(videoBytes))
-    
+
     await new Promise((resolve, reject) => {
       execFile('ffmpeg', [
         '-i', tmpInput,
         '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-        '-c:a', 'aac', '-b:a', '128k',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-b:a', '96k',
         '-movflags', '+faststart',
+        '-t', '60',
         '-y', tmpOutput
-      ], { timeout: 300000 }, (err, stdout, stderr) => {
-        if (err) return reject(new Error('ffmpeg failed: ' + stderr))
+      ], { timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error('ffmpeg: ' + stderr.slice(-300)))
         resolve()
       })
     })
-    
+
     const convertedBytes = fs.readFileSync(tmpOutput)
     fs.unlinkSync(tmpInput)
     fs.unlinkSync(tmpOutput)
 
+    // Step 4: upload to Supabase Storage
+    const fileName = 'video_' + Date.now() + '.mp4'
+    const supabaseUrl = process.env.SUPABASE_URL
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+    if (!supabaseUrl || !supabaseKey) throw new Error('Supabase env vars not set')
+
+    const uploadRes = await fetch(supabaseUrl + '/storage/v1/object/video-files/' + fileName, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + supabaseKey,
+        'Content-Type': 'video/mp4',
+        'x-upsert': 'true'
+      },
+      body: convertedBytes
+    })
+
+    if (!uploadRes.ok) {
+      const err = await uploadRes.text()
+      throw new Error('Supabase upload failed: ' + err)
+    }
+
+    // Return the storage path
+    res.json({ success: true, storage_path: fileName, file_size: convertedBytes.length })
+
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.post('/fire-story', async (req, res) => {
+  const { storage_path, fb_page_id, token } = req.body || {}
+  if (!storage_path || !fb_page_id || !token) {
+    return res.status(400).json({ success: false, error: 'storage_path, fb_page_id and token are required' })
+  }
+
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+
+    // Fetch video from Supabase
+    const fileRes = await fetch(supabaseUrl + '/storage/v1/object/video-files/' + storage_path, {
+      headers: { 'Authorization': 'Bearer ' + supabaseKey }
+    })
+    if (!fileRes.ok) throw new Error('Failed to fetch from Supabase: ' + fileRes.status)
+    const videoBytes = await fileRes.arrayBuffer()
+
+    // Upload to Facebook Story
     const startParams = new URLSearchParams()
     startParams.append('upload_phase', 'start')
-    startParams.append('file_size', String(convertedBytes.length))
+    startParams.append('file_size', String(videoBytes.byteLength))
     startParams.append('access_token', token)
-    const startRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(fb_page_id)}/video_stories`, {
+    const startRes = await fetch('https://graph.facebook.com/v21.0/' + encodeURIComponent(fb_page_id) + '/video_stories', {
       method: 'POST', body: startParams
     })
     const startJson = await startRes.json()
-    if (startJson.error) throw new Error(`FB start error: ${JSON.stringify(startJson.error)}`)
+    if (startJson.error) throw new Error('FB start: ' + JSON.stringify(startJson.error))
     const videoId = startJson.video_id || startJson.id
     const uploadUrl = startJson.upload_url
-    if (!videoId || !uploadUrl) throw new Error(`Missing video_id or upload_url: ${JSON.stringify(startJson)}`)
+    if (!videoId || !uploadUrl) throw new Error('Missing video_id or upload_url: ' + JSON.stringify(startJson))
 
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
-      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes 0-${convertedBytes.length - 1}/${convertedBytes.length}`, 'offset': '0', 'file_size': String(convertedBytes.length) },
-      body: convertedBytes
+      headers: {
+        Authorization: 'OAuth ' + token,
+        'Content-Type': 'application/octet-stream',
+        'Content-Range': 'bytes 0-' + (videoBytes.byteLength - 1) + '/' + videoBytes.byteLength,
+        'offset': '0',
+        'file_size': String(videoBytes.byteLength)
+      },
+      body: videoBytes
     })
-    const uploadBody = await uploadRes.text(); if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status}): ${uploadBody.slice(0, 300)}`)
+    if (!uploadRes.ok) {
+      const body = await uploadRes.text()
+      throw new Error('Upload failed (' + uploadRes.status + '): ' + body.slice(0, 300))
+    }
 
     const finishParams = new URLSearchParams()
     finishParams.append('upload_phase', 'finish')
     finishParams.append('video_id', videoId)
     finishParams.append('access_token', token)
-    const finishRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(fb_page_id)}/video_stories`, {
+    const finishRes = await fetch('https://graph.facebook.com/v21.0/' + encodeURIComponent(fb_page_id) + '/video_stories', {
       method: 'POST', body: finishParams
     })
     const finishJson = await finishRes.json()
-    if (finishJson.error) throw new Error(`FB finish error: ${JSON.stringify(finishJson.error)}`)
+    if (finishJson.error) throw new Error('FB finish: ' + JSON.stringify(finishJson.error))
+
+    // Delete from Supabase after successful post
+    await fetch(supabaseUrl + '/storage/v1/object/video-files/' + storage_path, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + supabaseKey }
+    })
 
     res.json({ success: true, video_id: videoId, result: finishJson })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
 })
-// force redeploy Mon May 25 05:45:11 UTC 2026
+
+app.listen(port, () => {
+  console.log('yt-resolver listening on ' + port)
+})
