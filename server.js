@@ -136,11 +136,41 @@ app.post('/fire-story', async (req, res) => {
 
 const jobs = {}
 
+async function setJobStatus(job_id, data) {
+  jobs[job_id] = data
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !supabaseKey) return
+  await fetch(supabaseUrl + '/rest/v1/video_jobs', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + supabaseKey,
+      'apikey': supabaseKey,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates'
+    },
+    body: JSON.stringify({ job_id, ...data, updated_at: new Date().toISOString() })
+  }).catch(() => {})
+}
+
+async function getJobStatus(job_id) {
+  if (jobs[job_id]) return jobs[job_id]
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !supabaseKey) return null
+  const res = await fetch(supabaseUrl + '/rest/v1/video_jobs?job_id=eq.' + job_id + '&select=*', {
+    headers: { 'Authorization': 'Bearer ' + supabaseKey, 'apikey': supabaseKey }
+  }).catch(() => null)
+  if (!res || !res.ok) return null
+  const rows = await res.json().catch(() => [])
+  return rows[0] || null
+}
+
 app.post('/prepare-async', async (req, res) => {
   const { url, job_id } = req.body || {}
   if (!url || !job_id) return res.status(400).json({ success: false, error: 'url and job_id required' })
   
-  jobs[job_id] = { status: 'processing' }
+  await setJobStatus(job_id, { status: 'processing' })
   res.json({ success: true, job_id, status: 'processing' })
   
   try {
@@ -160,14 +190,14 @@ app.post('/prepare-async', async (req, res) => {
     const bytes = Buffer.from(await videoRes.arrayBuffer())
     if (!bytes.length) throw new Error('Empty video')
     const result = await convertAndUpload(bytes)
-    jobs[job_id] = { status: 'done', ...result }
+    await setJobStatus(job_id, { status: 'done', ...result })
   } catch (e) {
-    jobs[job_id] = { status: 'error', error: e.message }
+    await setJobStatus(job_id, { status: 'error', error: e.message })
   }
 })
 
 app.get('/job-status/:job_id', (req, res) => {
-  const job = jobs[req.params.job_id]
+  const job = await getJobStatus(req.params.job_id)
   if (!job) return res.status(404).json({ success: false, error: 'Job not found' })
   res.json({ success: true, ...job })
 })
