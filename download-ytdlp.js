@@ -8,6 +8,13 @@ if (fs.existsSync(dest)) {
   process.exit(0)
 }
 
+console.log('Installing python3...')
+try {
+  execSync('apt-get install -y python3', { stdio: 'inherit' })
+} catch(e) {
+  console.log('apt-get failed:', e.message)
+}
+
 console.log('Downloading yt-dlp...')
 const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp'
 
