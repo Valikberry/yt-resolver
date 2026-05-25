@@ -59,7 +59,7 @@ app.post('/fire-story', async (req, res) => {
     const videoResponse = await fetch(resolveResult)
     if (!videoResponse.ok) throw new Error(`Failed to fetch video (${videoResponse.status})`)
     const videoBytes = await videoResponse.arrayBuffer()
-    if (!finalBytes.length) throw new Error('Empty video bytes')
+    if (!convertedBytes.length) throw new Error('Empty video bytes')
 
     // Convert to 9:16 portrait 1080x1920 using ffmpeg
     const tmpInput = path.join(os.tmpdir(), `input_${Date.now()}.mp4`)
@@ -87,7 +87,7 @@ app.post('/fire-story', async (req, res) => {
 
     const startParams = new URLSearchParams()
     startParams.append('upload_phase', 'start')
-    startParams.append('file_size', String(finalBytes.length))
+    startParams.append('file_size', String(convertedBytes.length))
     startParams.append('access_token', token)
     const startRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(fb_page_id)}/video_stories`, {
       method: 'POST', body: startParams
@@ -100,8 +100,8 @@ app.post('/fire-story', async (req, res) => {
 
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
-      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes 0-${finalBytes.length - 1}/${finalBytes.length}`, 'offset': '0', 'file_size': String(finalBytes.length) },
-      body: finalBytes
+      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes 0-${convertedBytes.length - 1}/${convertedBytes.length}`, 'offset': '0', 'file_size': String(convertedBytes.length) },
+      body: convertedBytes
     })
     const uploadBody = await uploadRes.text(); if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status}): ${uploadBody.slice(0, 300)}`)
 
