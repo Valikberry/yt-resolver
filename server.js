@@ -59,7 +59,6 @@ app.post('/fire-story', async (req, res) => {
     const videoResponse = await fetch(resolveResult)
     if (!videoResponse.ok) throw new Error(`Failed to fetch video (${videoResponse.status})`)
     const videoBytes = await videoResponse.arrayBuffer()
-    if (!convertedBytes.length) throw new Error('Empty video bytes')
 
     // Convert to 9:16 portrait 1080x1920 using ffmpeg
     const tmpInput = path.join(os.tmpdir(), `input_${Date.now()}.mp4`)
@@ -83,7 +82,6 @@ app.post('/fire-story', async (req, res) => {
     const convertedBytes = fs.readFileSync(tmpOutput)
     fs.unlinkSync(tmpInput)
     fs.unlinkSync(tmpOutput)
-    const finalBytes = convertedBytes
 
     const startParams = new URLSearchParams()
     startParams.append('upload_phase', 'start')
