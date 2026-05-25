@@ -76,7 +76,7 @@ app.post('/fire-story', async (req, res) => {
       headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream' },
       body: videoBytes
     })
-    if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status})`)
+    const uploadBody = await uploadRes.text(); if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status}): ${uploadBody.slice(0, 300)}`)
 
     const finishParams = new URLSearchParams()
     finishParams.append('upload_phase', 'finish')
