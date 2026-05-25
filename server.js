@@ -17,7 +17,7 @@ app.get('/health', (_req, res) => {
 app.post('/resolve', (req, res) => {
   const url = typeof req.body?.url === 'string' ? req.body.url.trim() : ''
   if (!url) { res.status(400).json({ success: false, error: 'url is required' }); return }
-  execFile('./yt-dlp', ['-j', url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+  execFile('./yt-dlp', ['-j', '--js-runtimes', 'nodejs', url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
     if (error) { res.status(400).json({ success: false, error: stderr || error.message }); return }
     try {
       const data = JSON.parse(stdout)
@@ -75,7 +75,7 @@ app.post('/prepare-video', async (req, res) => {
   if (!video_url) return res.status(400).json({ success: false, error: 'video_url is required' })
   try {
     const resolvedUrl = await new Promise((resolve, reject) => {
-      execFile('./yt-dlp', ['-j', '--format', 'worst[ext=mp4]/worst', video_url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      execFile('./yt-dlp', ['-j', '--js-runtimes', 'nodejs', '--format', 'worst[ext=mp4]/worst', video_url], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
         if (error) return reject(new Error(stderr || error.message))
         try {
           const data = JSON.parse(stdout)
