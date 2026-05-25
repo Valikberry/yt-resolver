@@ -34,6 +34,61 @@ app.post('/resolve', (req, res) => {
   })
 })
 
+
+async function downloadVideoUrl(url) {
+  const rapidApiKey = process.env.RAPIDAPI_KEY
+  if (!rapidApiKey) throw new Error('RAPIDAPI_KEY not set')
+  
+  const host = 'social-media-video-downloader.p.rapidapi.com'
+  let apiUrl
+  
+  if (url.includes('tiktok.com')) {
+    apiUrl = 'https://' + host + '/tiktok/v3/post/details?url=' + encodeURIComponent(url)
+  } else if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    const shortMatch = url.match(/shorts\/([a-zA-Z0-9_-]+)/)
+    const watchMatch = url.match(/[?&]v=([a-zA-Z0-9_-]+)/)
+    const videoId = shortMatch ? shortMatch[1] : watchMatch ? watchMatch[1] : null
+    if (!videoId) throw new Error('Could not extract YouTube video ID')
+    apiUrl = 'https://' + host + '/youtube/v3/video/details?videoId=' + videoId + '&urlAccess=proxied'
+  } else if (url.includes('instagram.com')) {
+    const scMatch = url.match(/\/(?:p|reel|tv)\/([a-zA-Z0-9_-]+)/)
+    if (!scMatch) throw new Error('Could not extract Instagram shortcode')
+    apiUrl = 'https://' + host + '/instagram/v3/media/post/details?shortcode=' + scMatch[1]
+  } else if (url.includes('facebook.com')) {
+    apiUrl = 'https://' + host + '/facebook/v3/post/details?url=' + encodeURIComponent(url)
+  } else {
+    throw new Error('Unsupported platform. Supported: TikTok, YouTube, Instagram, Facebook')
+  }
+
+  const res = await fetch(apiUrl, {
+    headers: {
+      'x-rapidapi-key': rapidApiKey,
+      'x-rapidapi-host': host
+    }
+  })
+  
+  const data = await res.json()
+  if (data.error) throw new Error('RapidAPI error: ' + JSON.stringify(data.error))
+  
+  const contents = data.contents?.[0]
+  if (!contents) throw new Error('No contents in RapidAPI response')
+  
+  // Get best MP4 video URL with audio - prefer h264, portrait if available
+  const videos = contents.videos || []
+  const sorted = videos
+    .filter(v => v.metadata?.has_audio && v.metadata?.mime_type?.includes('mp4'))
+    .sort((a, b) => (b.metadata?.content_length || 0) - (a.metadata?.content_length || 0))
+  
+  if (sorted.length === 0) {
+    // Try renderableVideos
+    const renderable = contents.renderableVideos?.[0]
+    if (renderable) return { type: 'renderable', config: renderable.renderConfig }
+    throw new Error('No downloadable video found')
+  }
+  
+  return { type: 'direct', url: sorted[0].url }
+}
+
 async function convertAndUpload(inputBuffer) {
   const tmpInput = path.join(os.tmpdir(), 'input_' + Date.now() + '.mp4')
   const tmpOutput = path.join(os.tmpdir(), 'output_' + Date.now() + '.mp4')
