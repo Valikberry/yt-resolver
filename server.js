@@ -196,7 +196,7 @@ app.post('/prepare-async', async (req, res) => {
   }
 })
 
-app.get('/job-status/:job_id', (req, res) => {
+app.get('/job-status/:job_id', async (req, res) => {
   const job = await getJobStatus(req.params.job_id)
   if (!job) return res.status(404).json({ success: false, error: 'Job not found' })
   res.json({ success: true, ...job })
