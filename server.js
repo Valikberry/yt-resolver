@@ -73,7 +73,7 @@ app.post('/fire-story', async (req, res) => {
 
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
-      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream' },
+      headers: { Authorization: `OAuth ${token}`, 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes 0-${videoBytes.byteLength - 1}/${videoBytes.byteLength}`, 'offset': '0', 'file_size': String(videoBytes.byteLength) },
       body: videoBytes
     })
     const uploadBody = await uploadRes.text(); if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status}): ${uploadBody.slice(0, 300)}`)
