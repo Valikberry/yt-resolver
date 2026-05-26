@@ -209,6 +209,16 @@ app.post('/fire-story', async (req, res) => {
   }
 })
 
+
+app.get('/test-supabase', async (req, res) => {
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+  const fileRes = await fetch(supabaseUrl + '/storage/v1/object/video-files/video_1779783227001.mp4', {
+    headers: { 'Authorization': 'Bearer ' + supabaseKey }
+  })
+  res.json({ status: fileRes.status, contentType: fileRes.headers.get('content-type'), contentLength: fileRes.headers.get('content-length') })
+})
+
 app.listen(port, () => {
   console.log('yt-resolver listening on ' + port)
 })
