@@ -176,10 +176,7 @@ app.post('/fire-story', async (req, res) => {
       method: 'POST',
       headers: {
         Authorization: 'OAuth ' + token,
-        'Content-Type': 'application/octet-stream',
-        'Content-Range': 'bytes 0-' + (videoBytes.byteLength - 1) + '/' + videoBytes.byteLength,
-        'offset': '0',
-        'file_size': String(videoBytes.byteLength)
+        'Content-Type': 'application/octet-stream'
       },
       body: videoBytes
     })
