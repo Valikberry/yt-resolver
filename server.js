@@ -71,8 +71,34 @@ async function downloadVideoUrl(url) {
   return { url: video.url, isPortrait }
 }
 
-async function convertAndUpload(inputBuffer, isPortrait) {
+async function convertAndUpload(inputBuffer, isPortrait, hook, hookColor) {
   let finalBuffer = inputBuffer
+
+  // Burn hook text if provided
+  if (hook && hook.trim()) {
+    const color = (hookColor || '#FF3B30').replace('#', '')
+    const tmpHookInput = path.join(os.tmpdir(), 'hook_input_' + Date.now() + '.mp4')
+    const tmpHookOutput = path.join(os.tmpdir(), 'hook_output_' + Date.now() + '.mp4')
+    fs.writeFileSync(tmpHookInput, inputBuffer)
+    const escapedHook = hook.replace(/'/g, "\'").replace(/:/g, '\:')
+    const drawtext = `drawtext=text='${escapedHook}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=60:fontcolor=0x${color}:borderw=4:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(lt(t,1),1,if(lt(t,2),0.7,if(lt(t,3),0.4,if(lt(t,4),0,0))))'`
+    await new Promise((resolve, reject) => {
+      execFile('ffmpeg', [
+        '-i', tmpHookInput,
+        '-vf', drawtext,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'copy',
+        '-t', '60',
+        '-y', tmpHookOutput
+      ], { timeout: 300000 }, (err, stdout, stderr) => {
+        if (err) return reject(new Error('ffmpeg hook: ' + stderr.slice(-300)))
+        resolve()
+      })
+    })
+    finalBuffer = fs.readFileSync(tmpHookOutput)
+    fs.unlinkSync(tmpHookInput)
+    fs.unlinkSync(tmpHookOutput)
+  }
 
   if (!isPortrait) {
     // Only re-encode landscape videos
@@ -122,7 +148,7 @@ async function convertAndUpload(inputBuffer, isPortrait) {
 }
 
 app.post('/prepare-from-url', async (req, res) => {
-  const { url } = req.body || {}
+  const { url, hook, hookColor } = req.body || {}
   if (!url) return res.status(400).json({ success: false, error: 'url is required' })
   try {
     const download = await downloadVideoUrl(url)
