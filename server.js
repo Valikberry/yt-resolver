@@ -245,6 +245,24 @@ app.post('/fire-story', async (req, res) => {
   }
 })
 
+
+app.get('/test-ffmpeg', async (req, res) => {
+  const { execFile } = require('child_process')
+  const path = require('path')
+  const os = require('os')
+  const tmpOut = path.join(os.tmpdir(), 'test_' + Date.now() + '.mp4')
+  execFile('ffmpeg', [
+    '-f', 'lavfi', '-i', 'color=c=blue:s=720x1280:d=5',
+    '-vf', "drawtext=text='TEST':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=130:fontcolor=red:borderw=5:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2",
+    '-c:v', 'libx264', '-t', '5', '-y', tmpOut
+  ], { timeout: 60000 }, (err, stdout, stderr) => {
+    if (err) return res.json({ success: false, error: stderr.slice(-500) })
+    const size = require('fs').statSync(tmpOut).size
+    require('fs').unlinkSync(tmpOut)
+    res.json({ success: true, size })
+  })
+})
+
 app.listen(port, () => {
   console.log('yt-resolver listening on ' + port)
 })
