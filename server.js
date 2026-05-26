@@ -64,9 +64,11 @@ async function downloadVideoUrl(url) {
     .filter(v => v.metadata?.has_audio && v.metadata?.mime_type?.includes('mp4') && v.metadata?.CodecType !== 'h265_hvc1')
     .sort((a, b) => (a.metadata?.content_length || 0) - (b.metadata?.content_length || 0))
 
-  if (sorted.length === 0) throw new Error('No downloadable video found')
+  const sizeFiltered = sorted.filter(v => (v.metadata?.content_length || 0) < 2000000)
+  const finalList = sizeFiltered.length > 0 ? sizeFiltered : sorted
+  if (finalList.length === 0) throw new Error('No downloadable video found')
 
-  const video = sorted[0]
+  const video = finalList[0]
   const isPortrait = (video.metadata?.height || 0) > (video.metadata?.width || 0)
   return { url: video.url, isPortrait }
 }
