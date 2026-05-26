@@ -95,7 +95,7 @@ async function convertAndUpload(inputBuffer, isPortrait, hook, hookColor) {
     await new Promise((resolve, reject) => {
       execFile('ffmpeg', [
         '-i', tmpHookInput,
-        '-vf', drawtext,
+        '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,' + drawtext,
         '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
         '-c:a', 'copy',
         '-t', '60',
