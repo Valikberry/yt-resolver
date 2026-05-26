@@ -77,7 +77,7 @@ async function convertAndUpload(inputBuffer) {
   await new Promise((resolve, reject) => {
     execFile('ffmpeg', [
       '-i', tmpInput,
-      '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
+      '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
       '-c:a', 'aac', '-b:a', '96k',
       '-movflags', '+faststart',
