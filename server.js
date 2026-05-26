@@ -71,47 +71,8 @@ async function downloadVideoUrl(url) {
   return { url: video.url, isPortrait }
 }
 
-async function convertAndUpload(inputBuffer, isPortrait, hook, hookColor) {
+async function convertAndUpload(inputBuffer, isPortrait) {
   let finalBuffer = inputBuffer
-
-  // Burn hook text if provided
-  if (hook && hook.trim()) {
-    const color = (hookColor || '#FF3B30').replace('#', '')
-    const tmpHookInput = path.join(os.tmpdir(), 'hook_input_' + Date.now() + '.mp4')
-    const tmpHookOutput = path.join(os.tmpdir(), 'hook_output_' + Date.now() + '.mp4')
-    fs.writeFileSync(tmpHookInput, inputBuffer)
-    const lines = hook.trim().toUpperCase().split(' ')
-    const fade = "if(lt(t,1),1,if(lt(t,2),0.7,if(lt(t,3),0.4,if(lt(t,4),0,0))))"
-    const font = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-    let drawtext
-    if (lines.length === 1) {
-      drawtext = `drawtext=text='${lines[0]}':fontfile=${font}:fontsize=130:fontcolor=0x${color}:borderw=5:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2:alpha='${fade}'`
-    } else {
-      drawtext = lines.map((line, i) => {
-        const y = i === 0 ? '(h/2 - text_h - 10)' : '(h/2 + 10)'
-        return `drawtext=text='${line}':fontfile=${font}:fontsize=130:fontcolor=0x${color}:borderw=5:bordercolor=white:x=(w-text_w)/2:y=${y}:alpha='${fade}'`
-      }).join(',')
-    }
-    await new Promise((resolve, reject) => {
-      execFile('ffmpeg', [
-        '-i', tmpHookInput,
-        '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,' + drawtext,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-movflags', '+faststart',
-        '-max_muxing_queue_size', '1024',
-        '-t', '60',
-        '-y', tmpHookOutput
-      ], { timeout: 300000 }, (err, stdout, stderr) => {
-        if (err) return reject(new Error('ffmpeg hook: ' + stderr.slice(-300)))
-        resolve()
-      })
-    })
-    finalBuffer = fs.readFileSync(tmpHookOutput)
-    fs.unlinkSync(tmpHookInput)
-    fs.unlinkSync(tmpHookOutput)
-  }
 
   if (!isPortrait) {
     // Only re-encode landscape videos
@@ -161,7 +122,7 @@ async function convertAndUpload(inputBuffer, isPortrait, hook, hookColor) {
 }
 
 app.post('/prepare-from-url', async (req, res) => {
-  const { url, hook, hookColor } = req.body || {}
+  const { url } = req.body || {}
   if (!url) return res.status(400).json({ success: false, error: 'url is required' })
   try {
     const download = await downloadVideoUrl(url)
@@ -246,24 +207,6 @@ app.post('/fire-story', async (req, res) => {
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
-})
-
-
-app.get('/test-ffmpeg', async (req, res) => {
-  const { execFile } = require('child_process')
-  const path = require('path')
-  const os = require('os')
-  const tmpOut = path.join(os.tmpdir(), 'test_' + Date.now() + '.mp4')
-  execFile('ffmpeg', [
-    '-f', 'lavfi', '-i', 'color=c=blue:s=720x1280:d=5',
-    '-vf', "drawtext=text='TEST':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=130:fontcolor=red:borderw=5:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2",
-    '-c:v', 'libx264', '-t', '5', '-y', tmpOut
-  ], { timeout: 60000 }, (err, stdout, stderr) => {
-    if (err) return res.json({ success: false, error: stderr.slice(-500) })
-    const size = require('fs').statSync(tmpOut).size
-    require('fs').unlinkSync(tmpOut)
-    res.json({ success: true, size })
-  })
 })
 
 app.listen(port, () => {
