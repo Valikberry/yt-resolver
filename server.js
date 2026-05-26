@@ -96,8 +96,11 @@ async function convertAndUpload(inputBuffer, isPortrait, hook, hookColor) {
       execFile('ffmpeg', [
         '-i', tmpHookInput,
         '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,' + drawtext,
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-        '-c:a', 'copy',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-max_muxing_queue_size', '1024',
         '-t', '60',
         '-y', tmpHookOutput
       ], { timeout: 300000 }, (err, stdout, stderr) => {
