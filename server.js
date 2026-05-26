@@ -66,41 +66,32 @@ async function downloadVideoUrl(url) {
 
   if (sorted.length === 0) throw new Error('No downloadable video found')
 
-  const video = sorted[0]
-  const isPortrait = (video.metadata?.height || 0) > (video.metadata?.width || 0)
-  return { url: video.url, isPortrait }
+  return sorted[0].url
 }
 
-async function convertAndUpload(inputBuffer, isPortrait) {
-  let finalBuffer = inputBuffer
+async function convertAndUpload(inputBuffer) {
+  const tmpInput = path.join(os.tmpdir(), 'input_' + Date.now() + '.mp4')
+  const tmpOutput = path.join(os.tmpdir(), 'output_' + Date.now() + '.mp4')
+  fs.writeFileSync(tmpInput, inputBuffer)
 
-  if (!isPortrait) {
-    // Only re-encode landscape videos
-    const tmpInput = path.join(os.tmpdir(), 'input_' + Date.now() + '.mp4')
-    const tmpOutput = path.join(os.tmpdir(), 'output_' + Date.now() + '.mp4')
-    fs.writeFileSync(tmpInput, inputBuffer)
-
-    await new Promise((resolve, reject) => {
-      execFile('ffmpeg', [
-        '-i', tmpInput,
-        '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-        '-c:a', 'aac', '-b:a', '96k',
-        '-movflags', '+faststart',
-        '-t', '60',
-        '-y', tmpOutput
-      ], { timeout: 300000 }, (err, stdout, stderr) => {
-        if (err) return reject(new Error('ffmpeg: ' + stderr.slice(-300)))
-        resolve()
-      })
+  await new Promise((resolve, reject) => {
+    execFile('ffmpeg', [
+      '-i', tmpInput,
+      '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+      '-c:a', 'aac', '-b:a', '96k',
+      '-movflags', '+faststart',
+      '-t', '60',
+      '-y', tmpOutput
+    ], { timeout: 120000 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error('ffmpeg: ' + stderr.slice(-300)))
+      resolve()
     })
+  })
 
-    finalBuffer = fs.readFileSync(tmpOutput)
-    fs.unlinkSync(tmpInput)
-    fs.unlinkSync(tmpOutput)
-  }
-
-  const convertedBytes = finalBuffer
+  const convertedBytes = fs.readFileSync(tmpOutput)
+  fs.unlinkSync(tmpInput)
+  fs.unlinkSync(tmpOutput)
 
   const fileName = 'video_' + Date.now() + '.mp4'
   const supabaseUrl = process.env.SUPABASE_URL
@@ -125,8 +116,8 @@ app.post('/prepare-from-url', async (req, res) => {
   const { url } = req.body || {}
   if (!url) return res.status(400).json({ success: false, error: 'url is required' })
   try {
-    const download = await downloadVideoUrl(url)
-    const videoRes = await fetch(download.url, {
+    const videoUrl = await downloadVideoUrl(url)
+    const videoRes = await fetch(videoUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
         'Referer': 'https://www.tiktok.com/',
@@ -136,8 +127,7 @@ app.post('/prepare-from-url', async (req, res) => {
     if (!videoRes.ok) throw new Error('Failed to fetch video: ' + videoRes.status)
     const bytes = Buffer.from(await videoRes.arrayBuffer())
     if (!bytes.length) throw new Error('Empty video')
-    const isPortrait = download.isPortrait || false
-    const result = await convertAndUpload(bytes, isPortrait)
+    const result = await convertAndUpload(bytes)
     res.json({ success: true, ...result })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
@@ -176,7 +166,10 @@ app.post('/fire-story', async (req, res) => {
       method: 'POST',
       headers: {
         Authorization: 'OAuth ' + token,
-        'Content-Type': 'application/octet-stream'
+        'Content-Type': 'application/octet-stream',
+        'Content-Range': 'bytes 0-' + (videoBytes.byteLength - 1) + '/' + videoBytes.byteLength,
+        'offset': '0',
+        'file_size': String(videoBytes.byteLength)
       },
       body: videoBytes
     })
@@ -206,17 +199,6 @@ app.post('/fire-story', async (req, res) => {
   }
 })
 
-
-app.get('/test-supabase', async (req, res) => {
-  const supabaseUrl = process.env.SUPABASE_URL
-  const supabaseKey = process.env.SUPABASE_SERVICE_KEY
-  const fileRes = await fetch(supabaseUrl + '/storage/v1/object/video-files/video_1779783227001.mp4', {
-    headers: { 'Authorization': 'Bearer ' + supabaseKey }
-  })
-  res.json({ status: fileRes.status, contentType: fileRes.headers.get('content-type'), contentLength: fileRes.headers.get('content-length') })
-})
-
 app.listen(port, () => {
   console.log('yt-resolver listening on ' + port)
 })
-// force redeploy Tue May 26 11:01:21 UTC 2026
