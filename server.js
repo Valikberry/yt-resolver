@@ -80,8 +80,18 @@ async function convertAndUpload(inputBuffer, isPortrait, hook, hookColor) {
     const tmpHookInput = path.join(os.tmpdir(), 'hook_input_' + Date.now() + '.mp4')
     const tmpHookOutput = path.join(os.tmpdir(), 'hook_output_' + Date.now() + '.mp4')
     fs.writeFileSync(tmpHookInput, inputBuffer)
-    const escapedHook = hook.replace(/'/g, "\'").replace(/:/g, '\:')
-    const drawtext = `drawtext=text='${escapedHook}':fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:fontsize=60:fontcolor=0x${color}:borderw=4:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(lt(t,1),1,if(lt(t,2),0.7,if(lt(t,3),0.4,if(lt(t,4),0,0))))'`
+    const lines = hook.trim().toUpperCase().split(' ')
+    const fade = "if(lt(t,1),1,if(lt(t,2),0.7,if(lt(t,3),0.4,if(lt(t,4),0,0))))"
+    const font = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+    let drawtext
+    if (lines.length === 1) {
+      drawtext = `drawtext=text='${lines[0]}':fontfile=${font}:fontsize=130:fontcolor=0x${color}:borderw=5:bordercolor=white:x=(w-text_w)/2:y=(h-text_h)/2:alpha='${fade}'`
+    } else {
+      drawtext = lines.map((line, i) => {
+        const y = i === 0 ? '(h/2 - text_h - 10)' : '(h/2 + 10)'
+        return `drawtext=text='${line}':fontfile=${font}:fontsize=130:fontcolor=0x${color}:borderw=5:bordercolor=white:x=(w-text_w)/2:y=${y}:alpha='${fade}'`
+      }).join(',')
+    }
     await new Promise((resolve, reject) => {
       execFile('ffmpeg', [
         '-i', tmpHookInput,
