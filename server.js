@@ -83,7 +83,7 @@ async function convertAndUpload(inputBuffer) {
       '-movflags', '+faststart',
       '-t', '60',
       '-y', tmpOutput
-    ], { timeout: 120000 }, (err, stdout, stderr) => {
+    ], { timeout: 300000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error('ffmpeg: ' + stderr.slice(-300)))
       resolve()
     })
