@@ -62,7 +62,7 @@ async function downloadVideoUrl(url) {
   const videos = contents.videos || []
   const sorted = videos
     .filter(v => v.metadata?.has_audio && v.metadata?.mime_type?.includes('mp4') && v.metadata?.CodecType !== 'h265_hvc1')
-    .sort((a, b) => (b.metadata?.content_length || 0) - (a.metadata?.content_length || 0))
+    .sort((a, b) => (a.metadata?.content_length || 0) - (b.metadata?.content_length || 0))
 
   if (sorted.length === 0) throw new Error('No downloadable video found')
 
