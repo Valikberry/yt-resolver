@@ -87,7 +87,7 @@ async function convertAndUpload(inputBuffer, isPortrait) {
         '-i', tmpInput,
         '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0', '-pix_fmt', 'yuv420p',
         '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black',
-        '-preset', 'ultrafast', '-crf', '28',
+        '-preset', 'ultrafast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '96k',
         '-movflags', '+faststart',
         '-t', '60',
