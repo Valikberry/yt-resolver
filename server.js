@@ -76,8 +76,8 @@ async function downloadVideoUrl(url) {
 async function convertAndUpload(inputBuffer, isPortrait) {
   let finalBuffer = inputBuffer
 
-  if (!isPortrait) {
-    // Only re-encode landscape videos
+  if (!isPortrait || inputBuffer.length > 1000000) {
+    // Re-encode landscape videos and any video larger than 1MB for Facebook compatibility
     const tmpInput = path.join(os.tmpdir(), 'input_' + Date.now() + '.mp4')
     const tmpOutput = path.join(os.tmpdir(), 'output_' + Date.now() + '.mp4')
     fs.writeFileSync(tmpInput, inputBuffer)
@@ -85,8 +85,9 @@ async function convertAndUpload(inputBuffer, isPortrait) {
     await new Promise((resolve, reject) => {
       execFile('ffmpeg', [
         '-i', tmpInput,
+        '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0', '-pix_fmt', 'yuv420p',
         '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-preset', 'ultrafast', '-crf', '28',
         '-c:a', 'aac', '-b:a', '96k',
         '-movflags', '+faststart',
         '-t', '60',
