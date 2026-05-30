@@ -124,6 +124,138 @@ async function convertAndUpload(inputBuffer, isPortrait) {
   return { storage_path: fileName, file_size: convertedBytes.length }
 }
 
+function getImageUrl(candidate) {
+  if (!candidate) return null
+  if (typeof candidate === 'string') return candidate
+  return candidate.url || candidate.src || candidate.image_url || candidate.download_url || candidate.thumbnail || null
+}
+
+function getImageScore(candidate) {
+  if (!candidate || typeof candidate === 'string') return 0
+  const metadata = candidate.metadata || {}
+  const width = candidate.width || metadata.width || 0
+  const height = candidate.height || metadata.height || 0
+  const size = candidate.content_length || metadata.content_length || candidate.size || 0
+  return (width * height) || size || 0
+}
+
+function collectPinterestImageCandidates(value, pathParts = [], candidates = []) {
+  if (!value) return candidates
+
+  if (typeof value === 'string') {
+    const lowerValue = value.toLowerCase()
+    const pathText = pathParts.join('.').toLowerCase()
+    const looksLikeImage = /\.(jpe?g|png|webp)(\?|$)/.test(lowerValue)
+    const imagePath = /(image|img|photo|picture|thumbnail|original|media|url)/.test(pathText)
+    const looksLikeVideo = /\.(mp4|m3u8|mov)(\?|$)/.test(lowerValue)
+
+    if (value.startsWith('http') && !looksLikeVideo && (looksLikeImage || imagePath)) {
+      let score = 1
+      if (pathText.includes('original')) score += 1000000000
+      if (pathText.includes('large') || pathText.includes('hd')) score += 100000000
+      if (pathText.includes('image') || pathText.includes('img')) score += 10000000
+      if (pathText.includes('thumbnail')) score -= 1000000
+      candidates.push({ url: value, score })
+    }
+    return candidates
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectPinterestImageCandidates(item, pathParts.concat(String(index)), candidates))
+    return candidates
+  }
+
+  if (typeof value === 'object') {
+    const directUrl = getImageUrl(value)
+    if (directUrl) {
+      candidates.push({
+        url: directUrl,
+        score: getImageScore(value) + (pathParts.join('.').toLowerCase().includes('thumbnail') ? -1000000 : 0)
+      })
+    }
+
+    Object.entries(value).forEach(([key, item]) => {
+      collectPinterestImageCandidates(item, pathParts.concat(key), candidates)
+    })
+  }
+
+  return candidates
+}
+
+function extractPinterestImageUrl(data) {
+  const candidates = collectPinterestImageCandidates(data)
+    .filter(candidate => candidate.url)
+    .sort((a, b) => b.score - a.score)
+
+  return candidates[0]?.url || null
+}
+
+async function downloadImageUrl(url) {
+  const rapidApiKey = process.env.RAPIDAPI_KEY
+  if (!rapidApiKey) throw new Error('RAPIDAPI_KEY not set')
+
+  let host
+  let apiUrl
+  let extractImageUrl
+
+  if (url.includes('tiktok.com')) {
+    host = 'social-media-video-downloader.p.rapidapi.com'
+    apiUrl = 'https://' + host + '/tiktok/v3/post/details?url=' + encodeURIComponent(url)
+    extractImageUrl = (data) => {
+      const contents = data.contents?.[0]
+      if (!contents) throw new Error('No contents in RapidAPI response')
+
+      const images = contents.images || []
+      const sorted = images
+        .map(image => ({ url: getImageUrl(image), score: getImageScore(image) }))
+        .filter(image => image.url)
+        .sort((a, b) => b.score - a.score)
+
+      return sorted[0]?.url || getImageUrl(contents.thumbnail)
+    }
+  } else if (url.includes('pinterest.com') || url.includes('pin.it')) {
+    host = 'pinterest-video-and-image-downloader.p.rapidapi.com'
+    apiUrl = 'https://' + host + '/pinterest?url=' + encodeURIComponent(url)
+    extractImageUrl = extractPinterestImageUrl
+  } else {
+    throw new Error('Unsupported platform. Supported: TikTok, Pinterest')
+  }
+
+  const res = await fetch(apiUrl, {
+    headers: {
+      'x-rapidapi-key': rapidApiKey,
+      'x-rapidapi-host': host
+    }
+  })
+
+  const data = await res.json()
+  if (data.error) throw new Error('RapidAPI error: ' + JSON.stringify(data.error))
+
+  const imageUrl = extractImageUrl(data)
+  if (!imageUrl) throw new Error('No downloadable image found')
+  return imageUrl
+}
+
+async function uploadImage(inputBuffer) {
+  const fileName = 'img_' + Date.now() + '.jpg'
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !supabaseKey) throw new Error('Supabase env vars not set')
+
+  const uploadRes = await fetch(supabaseUrl + '/storage/v1/object/images/' + fileName, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + supabaseKey, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' },
+    body: inputBuffer
+  })
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text()
+    throw new Error('Supabase upload failed: ' + err)
+  }
+
+  return supabaseUrl + '/storage/v1/object/public/images/' + fileName
+}
+
 app.post('/prepare-from-url', async (req, res) => {
   const { url } = req.body || {}
   if (!url) return res.status(400).json({ success: false, error: 'url is required' })
@@ -142,6 +274,27 @@ app.post('/prepare-from-url', async (req, res) => {
     const isPortrait = download.isPortrait || false
     const result = await convertAndUpload(bytes, isPortrait)
     res.json({ success: true, ...result })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.post('/extract-image', async (req, res) => {
+  const { url } = req.body || {}
+  if (!url) return res.status(400).json({ success: false, error: 'url is required' })
+  try {
+    const imageUrl = await downloadImageUrl(url)
+    const imageRes = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+      }
+    })
+    if (!imageRes.ok) throw new Error('Failed to fetch image: ' + imageRes.status)
+    const bytes = Buffer.from(await imageRes.arrayBuffer())
+    if (!bytes.length) throw new Error('Empty image')
+    const publicUrl = await uploadImage(bytes)
+    res.json({ success: true, image_url: publicUrl })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
