@@ -21,6 +21,18 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true })
 })
 
+app.get('/debug-env', (_req, res) => {
+  execFile('sh', ['-c', 'which python3 && which pip3 2>/dev/null || echo nopip3 && which yt-dlp 2>/dev/null || echo noytdlp && ls /usr/local/bin/yt-dlp 2>/dev/null || echo nobin && ls ./yt-dlp 2>/dev/null || echo nolocal && echo cwd=$(pwd)'], (err, stdout, stderr) => {
+    res.json({
+      success: !err,
+      cwd: process.cwd(),
+      stdout,
+      stderr,
+      error: err ? err.message : null
+    })
+  })
+})
+
 async function downloadVideoUrl(url) {
   const rapidApiKey = process.env.RAPIDAPI_KEY
   if (!rapidApiKey) throw new Error('RAPIDAPI_KEY not set')
