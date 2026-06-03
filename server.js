@@ -81,7 +81,7 @@ function isRapidApiFallbackError(err) {
 async function downloadVideoWithYtDlp(url) {
   const info = await new Promise((resolve, reject) => {
     execFile('./yt-dlp', ['--dump-json', url], { timeout: 300000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error('yt-dlp: ' + stderr.slice(-300)))
+      if (err) return reject(new Error('yt-dlp: stderr=' + stderr.slice(-500) + ' stdout=' + stdout.slice(-200)))
       try {
         resolve(JSON.parse(stdout))
       } catch (parseErr) {
