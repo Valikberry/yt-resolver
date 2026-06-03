@@ -73,6 +73,56 @@ async function downloadVideoUrl(url) {
   return { url: video.url, isPortrait }
 }
 
+function isRapidApiFallbackError(err) {
+  const message = err?.message || ''
+  return message.includes('RapidAPI error:') || message.includes('not_found')
+}
+
+async function downloadVideoWithYtDlp(url) {
+  const info = await new Promise((resolve, reject) => {
+    execFile('./yt-dlp', ['--dump-json', url], { timeout: 300000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error('yt-dlp: ' + stderr.slice(-300)))
+      try {
+        resolve(JSON.parse(stdout))
+      } catch (parseErr) {
+        reject(new Error('yt-dlp JSON parse failed: ' + parseErr.message))
+      }
+    })
+  })
+
+  const formats = (info.formats || [])
+    .filter(format => {
+      const vcodec = String(format.vcodec || '').toLowerCase()
+      return format.url && format.ext === 'mp4' && vcodec !== 'none' && (vcodec.includes('avc1') || vcodec.includes('h264'))
+    })
+    .sort((a, b) => {
+      const aHeight = a.height || 0
+      const bHeight = b.height || 0
+      const aTbr = a.tbr || 0
+      const bTbr = b.tbr || 0
+      const aSize = a.filesize || a.filesize_approx || 0
+      const bSize = b.filesize || b.filesize_approx || 0
+      return (bHeight - aHeight) || (bTbr - aTbr) || (bSize - aSize)
+    })
+
+  const under2Mb = formats.filter(format => (format.filesize || format.filesize_approx || Infinity) < 2000000)
+  const video = (under2Mb.length > 0 ? under2Mb : formats)[0]
+  if (!video) throw new Error('No H.264 format found')
+
+  const videoRes = await fetch(video.url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+      'Accept': '*/*'
+    }
+  })
+  if (!videoRes.ok) throw new Error('Failed to fetch yt-dlp video: ' + videoRes.status)
+  const bytes = Buffer.from(await videoRes.arrayBuffer())
+  if (!bytes.length) throw new Error('Empty yt-dlp video')
+
+  const isPortrait = (video.height || info.height || 0) > (video.width || info.width || 0)
+  return { bytes, isPortrait }
+}
+
 async function convertAndUpload(inputBuffer, isPortrait) {
   let finalBuffer = inputBuffer
 
@@ -260,18 +310,29 @@ app.post('/prepare-from-url', async (req, res) => {
   const { url } = req.body || {}
   if (!url) return res.status(400).json({ success: false, error: 'url is required' })
   try {
-    const download = await downloadVideoUrl(url)
-    const videoRes = await fetch(download.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
-        'Referer': 'https://www.tiktok.com/',
-        'Accept': '*/*'
-      }
-    })
-    if (!videoRes.ok) throw new Error('Failed to fetch video: ' + videoRes.status)
-    const bytes = Buffer.from(await videoRes.arrayBuffer())
-    if (!bytes.length) throw new Error('Empty video')
-    const isPortrait = download.isPortrait || false
+    let bytes
+    let isPortrait
+
+    try {
+      const download = await downloadVideoUrl(url)
+      const videoRes = await fetch(download.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+          'Referer': 'https://www.tiktok.com/',
+          'Accept': '*/*'
+        }
+      })
+      if (!videoRes.ok) throw new Error('Failed to fetch video: ' + videoRes.status)
+      bytes = Buffer.from(await videoRes.arrayBuffer())
+      if (!bytes.length) throw new Error('Empty video')
+      isPortrait = download.isPortrait || false
+    } catch (rapidErr) {
+      if (!isRapidApiFallbackError(rapidErr)) throw rapidErr
+      const ytDlpDownload = await downloadVideoWithYtDlp(url)
+      bytes = ytDlpDownload.bytes
+      isPortrait = ytDlpDownload.isPortrait || false
+    }
+
     const result = await convertAndUpload(bytes, isPortrait)
     res.json({ success: true, ...result })
   } catch (e) {
