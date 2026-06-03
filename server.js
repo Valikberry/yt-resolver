@@ -91,48 +91,25 @@ function isRapidApiFallbackError(err) {
 }
 
 async function downloadVideoWithYtDlp(url) {
-  const info = await new Promise((resolve, reject) => {
-    execFile('./yt-dlp', ['--dump-json', url], { timeout: 300000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
+  const tmpOutput = path.join(os.tmpdir(), 'ytdlp_' + Date.now() + '.mp4')
+
+  await new Promise((resolve, reject) => {
+    execFile('./yt-dlp', [
+      '--format', 'bestvideo[ext=mp4][vcodec*=avc1]+bestaudio/best[ext=mp4][vcodec*=avc1]/best[ext=mp4]',
+      '--merge-output-format', 'mp4',
+      '-o', tmpOutput,
+      url
+    ], { timeout: 300000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(new Error('yt-dlp: stderr=' + stderr.slice(-500) + ' stdout=' + stdout.slice(-200)))
-      try {
-        resolve(JSON.parse(stdout))
-      } catch (parseErr) {
-        reject(new Error('yt-dlp JSON parse failed: ' + parseErr.message))
-      }
+      resolve()
     })
   })
 
-  const formats = (info.formats || [])
-    .filter(format => {
-      const vcodec = String(format.vcodec || '').toLowerCase()
-      return format.url && format.ext === 'mp4' && vcodec !== 'none' && (vcodec.includes('avc1') || vcodec.includes('h264'))
-    })
-    .sort((a, b) => {
-      const aHeight = a.height || 0
-      const bHeight = b.height || 0
-      const aTbr = a.tbr || 0
-      const bTbr = b.tbr || 0
-      const aSize = a.filesize || a.filesize_approx || 0
-      const bSize = b.filesize || b.filesize_approx || 0
-      return (bHeight - aHeight) || (bTbr - aTbr) || (bSize - aSize)
-    })
-
-  const under2Mb = formats.filter(format => (format.filesize || format.filesize_approx || Infinity) < 2000000)
-  const video = (under2Mb.length > 0 ? under2Mb : formats)[0]
-  if (!video) throw new Error('No H.264 format found')
-
-  const videoRes = await fetch(video.url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
-      'Accept': '*/*'
-    }
-  })
-  if (!videoRes.ok) throw new Error('Failed to fetch yt-dlp video: ' + videoRes.status)
-  const bytes = Buffer.from(await videoRes.arrayBuffer())
+  const bytes = fs.readFileSync(tmpOutput)
+  fs.unlinkSync(tmpOutput)
   if (!bytes.length) throw new Error('Empty yt-dlp video')
 
-  const isPortrait = (video.height || info.height || 0) > (video.width || info.width || 0)
-  return { bytes, isPortrait }
+  return { bytes, isPortrait: true }
 }
 
 async function convertAndUpload(inputBuffer, isPortrait) {
